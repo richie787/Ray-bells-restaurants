@@ -1621,46 +1621,122 @@
             renderOrderSummary();
         });
 
-        document.getElementById('submitOrderBtn').addEventListener('click', function() {
-            if (window._orderItems.length === 0) return alert('Add at least one item.');
-            const instructions = document.getElementById('orderSpecialInstructions').value.trim();
-            const orders = getData(STORAGE_ORDERS, []);
-            const orderId = 'ORD-' + Date.now().toString().slice(-6);
-            const total = window._orderItems.reduce((sum, i) => sum + i.price * i.qty, 0);
-            const newOrder = {
-                id: orderId,
-                table: selectedTableId,
-                items: window._orderItems.map(i => ({ name: i.name, qty: i.qty, price: i.price, notes: instructions })),
-                total: total,
-                status: 'new',
-                date: new Date().toISOString(),
-                customer: 'Table ' + (getData(STORAGE_TABLES, defaultTables).find(t => t.id === selectedTableId)?.number ||
-                    ''),
-                waiter: currentUser.username,
-                orderType: 'dine-in',
-                notified: false
-            };
-            orders.push(newOrder);
-            setData(STORAGE_ORDERS, orders);
+         document.getElementById('submitOrderBtn').addEventListener('click', async function() {
 
-            const tables = getData(STORAGE_TABLES, defaultTables);
-            const table = tables.find(t => t.id === selectedTableId);
-            if (table) { table.status = 'occupied';
-                table.orderId = orderId;
-                setData(STORAGE_TABLES, tables); }
+    if (window._orderItems.length === 0) {
+        return alert('Add at least one item.');
+    }
 
-            document.getElementById('orderModal').classList.remove('active');
-            window._orderItems = [];
-            alert(`✅ Order ${orderId} submitted for Table ${table?.number}`);
-            renderDashTab('tables');
-            if (currentUser.role === 'kitchen') renderDashTab('orders');
-            checkForNewOrders();
-        });
+    const instructions =
+        document.getElementById('orderSpecialInstructions').value.trim();
 
-        document.getElementById('closeOrderModal').addEventListener('click', function() {
-            document.getElementById('orderModal').classList.remove('active');
-        });
+    // Get selected table
+    const tables = getData(STORAGE_TABLES, defaultTables);
 
+    const table = tables.find(
+        t => t.id === selectedTableId
+    );
+
+    if (!table) {
+        return alert('Please select a table.');
+    }
+
+    // Calculate total
+    const total = window._orderItems.reduce(
+        (sum, item) => sum + (item.price * item.qty),
+        0
+    );
+
+    // Prepare order for PHP
+    const orderData = {
+
+        table_number: String(table.number),
+
+        waiter_username: currentUser.username,
+
+        items: window._orderItems.map(item => ({
+            meal_id: null,
+            name: item.name,
+            qty: item.qty,
+            price: item.price,
+            notes: instructions
+        })),
+
+        total: total,
+
+        notes: instructions
+    };
+
+    try {
+
+        // Show saving message
+        const button = this;
+
+        button.disabled = true;
+        button.textContent = 'Sending Order...';
+
+        // Send order to Raybells PHP backend
+        const response = await fetch(
+            'https://raybells.rf.gd/backend/create_order.php',
+            {
+                method: 'POST',
+
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+
+                body: JSON.stringify(orderData)
+            }
+        );
+
+        const result = await response.json();
+
+        // Check server response
+        if (!result.success) {
+
+            throw new Error(
+                result.message || 'Order could not be submitted.'
+            );
+        }
+
+        // Success
+        alert(
+            `✅ Order ${result.order_number} submitted successfully for Table ${table.number}.`
+        );
+
+        // Clear order form
+        document.getElementById('orderModal')
+            .classList.remove('active');
+
+        window._orderItems = [];
+
+        document.getElementById(
+            'orderSpecialInstructions'
+        ).value = '';
+
+        // Update local table display
+        table.status = 'occupied';
+
+        renderDashTab('tables');
+
+        // Reset button
+        button.disabled = false;
+        button.textContent = 'Submit Order';
+
+    } catch (error) {
+
+        console.error('Order submission error:', error);
+
+        alert(
+            '❌ Order could not be sent to the server.\n\n' +
+            error.message
+        );
+
+        this.disabled = false;
+        this.textContent = 'Submit Order';
+    }
+
+});
         // ============================================================
         // ORDER MANAGEMENT
         // ============================================================
